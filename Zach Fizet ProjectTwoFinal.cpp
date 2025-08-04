@@ -3,190 +3,291 @@
 #include <sstream>
 #include <vector>
 #include <unordered_map>
+#include <map>
+#include <memory>
 #include <algorithm>
-
-/* Zach Fizet
-	SNHU CS-320
-	Project 2
-	4/14/2025
-*/
+#include <limits>
 
 using namespace std;
 
-// Course object
+/* Zach Fizet
+   SNHU CS-320
+   Project 2 - Adaptive Data Structures + Strategy Pattern + Unit Tests
+   4/14/2025
+*/
 
+// Struct to represent a course
 struct Course {
-	string courseId;
-	string title;
-	vector<string> prerequisites;
+    string courseId;
+    string title;
+    vector<string> prerequisites;
 };
 
-// Load course data from CSV file into hash map
+// Strategy interface to support different storage backends
+class ICourseStorage {
+public:
+    virtual void addCourse(const Course& course) = 0;
+    virtual const Course* getCourse(const string& courseId) const = 0;
+    virtual vector<Course> getAllCourses() const = 0;
+    virtual ~ICourseStorage() {}
+};
 
-void loadCourses(const string& filename, unordered_map<string, Course>& courseMap) {
-	ifstream file(filename);
-	if (!file.is_open()) {
-		cerr << "Error: Could not open file'" << filename << "'.\n" << endl;
-		return;
-	}
+// Strategy 1: Unordered map for fast lookups (O(1) average)
+class HashCourseStorage : public ICourseStorage {
+private:
+    unordered_map<string, Course> courseMap;
 
-	string line;
-	while (getline(file, line)) {
-		stringstream ss(line);
-		string word;
-		Course course;
+public:
+    void addCourse(const Course& course) override {
+        courseMap[course.courseId] = course;
+    }
 
+    const Course* getCourse(const string& courseId) const override {
+        auto it = courseMap.find(courseId);
+        if (it != courseMap.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
 
-		// get course ID
-		if (!getline(ss, course.courseId, ',')) continue;
+    vector<Course> getAllCourses() const override {
+        vector<Course> courses;
+        for (const auto& pair : courseMap) {
+            if (pair.first.find("CS") == 0)
+                courses.push_back(pair.second);
+        }
+        sort(courses.begin(), courses.end(), [](const Course& a, const Course& b) {
+            return a.courseId < b.courseId;
+        });
+        return courses;
+    }
+};
 
-		// get course title
-		if (!getline(ss, course.title, ',')) continue;
+// Strategy 2: Tree map for sorted storage (O(log n) inserts, sorted output)
+class TreeCourseStorage : public ICourseStorage {
+private:
+    map<string, Course> courseTree;
 
-		// get prerequisites
-		while (getline(ss, word, ',')) {
-			course.prerequisites.push_back(word);
-		}
+public:
+    void addCourse(const Course& course) override {
+        courseTree[course.courseId] = course;
+    }
 
-		// store course in hash map
-		courseMap[course.courseId] = course;
-	}
+    const Course* getCourse(const string& courseId) const override {
+        auto it = courseTree.find(courseId);
+        if (it != courseTree.end()) {
+            return &it->second;
+        }
+        return nullptr;
+    }
 
-	file.close();
-	cout << "Courses loaded successfully." << endl;
+    vector<Course> getAllCourses() const override {
+        vector<Course> courses;
+        for (const auto& pair : courseTree) {
+            if (pair.first.find("CS") == 0)
+                courses.push_back(pair.second);
+        }
+        return courses; // Already sorted
+    }
+};
+
+// Display a course and its prerequisites
+void displayCourse(const Course& course, const ICourseStorage& storage) {
+    cout << course.courseId << ": " << course.title << endl;
+    if (!course.prerequisites.empty()) {
+        cout << "Prerequisites: ";
+        for (size_t i = 0; i < course.prerequisites.size(); ++i) {
+            string preId = course.prerequisites[i];
+            cout << preId;
+            const Course* prereq = storage.getCourse(preId);
+            if (prereq != nullptr) {
+                cout << " (" << prereq->title << ")";
+            }
+            if (i < course.prerequisites.size() - 1)
+                cout << ", ";
+        }
+        cout << endl;
+    } else {
+        cout << "Prerequisites: None" << endl;
+    }
 }
 
-// display a course and its prerequisites (if applicable)
+// Load course data from file into the current storage strategy
+void loadCourses(const string& filename, ICourseStorage& storage) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Error: Could not open file '" << filename << "'.\n";
+        return;
+    }
 
-void displayCourse(const Course& course, const unordered_map<string, Course>& courseMap) {
-	cout << course.courseId << ": " << course.title << endl;
-	if (!course.prerequisites.empty()) {
-		cout << "Prerequisites: ";
-		for (size_t i = 0; i < course.prerequisites.size(); ++i) {
-			string preId = course.prerequisites[i];
-			cout << preId;
-			if (courseMap.count(preId)) {
-				cout << " (" << courseMap.at(preId).title << ")";
-			}
-			if (i < course.prerequisites.size() - 1)
-				cout << ", ";
-		}
-		cout << endl;
-	}
-	else {
-		cout << "Prerequisites: None" << endl;
-	}
-}
-// method for printing courses in a sorted order
-void printSortedCourses(const unordered_map<string, Course>& courseMap) {
-	vector<string> sortedKeys;
+    string line;
+    while (getline(file, line)) {
+        stringstream ss(line);
+        string word;
+        Course course;
 
-	// find and collect all course IDs that start with "CS"
-	for (const auto& pair : courseMap) {
-		if (pair.first.find("CS") == 0) {
-			sortedKeys.push_back(pair.first);
-		}
-	}
+        if (!getline(ss, course.courseId, ',')) continue;
+        if (!getline(ss, course.title, ',')) continue;
+        while (getline(ss, word, ',')) {
+            course.prerequisites.push_back(word);
+        }
 
-	// sort course IDs
-	sort(sortedKeys.begin(), sortedKeys.end());
+        storage.addCourse(course);
+    }
 
-	// display sorted CS course list
-	cout << "\n--- Computer Science Course List ---\n";
-	for (const string& courseId : sortedKeys) {
-		cout << courseId << ": " << courseMap.at(courseId).title << endl;
-	}
-	cout << endl;
+    file.close();
+    cout << "Courses loaded successfully." << endl;
 }
 
-// Find and display a specific course
-void findCourse(const unordered_map<string, Course>& courseMap) {
-	cout << "Enter course ID: ";
-	string courseId;
-	cin >> courseId;
+// Print CS courses in sorted order
+void printSortedCourses(const ICourseStorage& storage) {
+    vector<Course> courses = storage.getAllCourses();
+    cout << "\n--- Computer Science Course List ---\n";
+    for (const auto& course : courses) {
+        cout << course.courseId << ": " << course.title << endl;
+    }
+    cout << endl;
+}
 
-	auto it = courseMap.find(courseId);
-	if (it != courseMap.end()) {
-		displayCourse(it->second, courseMap);
-	}
-	else {
-		cout << "Course not found." << endl;
-	}
+// Prompt user to find and view a course
+void findCourse(const ICourseStorage& storage) {
+    cout << "Enter course ID: ";
+    string courseId;
+    cin >> courseId;
+
+    const Course* course = storage.getCourse(courseId);
+    if (course) {
+        displayCourse(*course, storage);
+    } else {
+        cout << "Course not found." << endl;
+    }
+}
+
+// Ask user which storage strategy they want to use
+unique_ptr<ICourseStorage> chooseStrategy() {
+    cout << "Select data structure strategy:\n";
+    cout << "1. Fast lookups (unordered_map)\n";
+    cout << "2. Sorted storage (map)\n";
+    cout << "Enter choice: ";
+
+    int strategy;
+    cin >> strategy;
+
+    if (strategy == 2) {
+        cout << "Using map for sorted access.\n";
+        return make_unique<TreeCourseStorage>();
+    } else {
+        cout << "Using unordered_map for fast access.\n";
+        return make_unique<HashCourseStorage>();
+    }
+}
+
+// Unit test runner for both strategies
+void runTests() {
+    cout << "\n--- Running Unit Tests ---\n";
+
+    auto testStorage = [](const string& name, unique_ptr<ICourseStorage> storage) {
+        cout << "Testing " << name << "...\n";
+
+        Course cs101 = { "CS101", "Intro to Computer Science", {} };
+        Course cs102 = { "CS102", "Data Structures", { "CS101" } };
+
+        storage->addCourse(cs101);
+        storage->addCourse(cs102);
+
+        const Course* result = storage->getCourse("CS101");
+        if (result && result->title == "Intro to Computer Science") {
+            cout << "[PASS] getCourse(\"CS101\")\n";
+        } else {
+            cout << "[FAIL] getCourse(\"CS101\")\n";
+        }
+
+        result = storage->getCourse("MATH101");
+        if (!result) {
+            cout << "[PASS] getCourse(\"MATH101\") not found\n";
+        } else {
+            cout << "[FAIL] getCourse(\"MATH101\") should not exist\n";
+        }
+
+        vector<Course> csCourses = storage->getAllCourses();
+        if (csCourses.size() == 2 && csCourses[0].courseId < csCourses[1].courseId) {
+            cout << "[PASS] getAllCourses() sorted order\n";
+        } else {
+            cout << "[FAIL] getAllCourses() sorting or size issue\n";
+        }
+
+        cout << endl;
+    };
+
+    testStorage("HashCourseStorage", make_unique<HashCourseStorage>());
+    testStorage("TreeCourseStorage", make_unique<TreeCourseStorage>());
 }
 
 // Menu interface
-
 void displayMenu() {
-	unordered_map<string, Course> courseMap;
-	string filename;
-	bool isLoaded = false;
-	
-	// while loop for displaying menu options
-	while (true) {
-		cout << "\n Menu:\n";
-		cout << "1. Load Course data\n";
-		cout << "2. Print sorted list of CS courses\n";
-		cout << "3. Print course information\n";
-		cout << "9 Exit\n";
-		cout << "Choose an option: ";
+    unique_ptr<ICourseStorage> storage = chooseStrategy();
+    bool isLoaded = false;
+    string filename;
 
+    while (true) {
+        cout << "\nMenu:\n";
+        cout << "1. Load course data\n";
+        cout << "2. Print sorted list of CS courses\n";
+        cout << "3. Print course information\n";
+        cout << "4. Run unit tests\n";
+        cout << "9. Exit\n";
+        cout << "Choose an option: ";
 
-		// assigns the next input as the choice made by the user
-		// corresponds to the switch cases below
-		int choice;
-		cin >> choice;
+        int choice;
+        cin >> choice;
 
-		// added for error handling invalid inputs
-		if (cin.fail()) {
-			cin.clear();
-			cin.ignore(numeric_limits<streamsize>::max(), '\n');
-			cout << "Invalid input, please select a valid option.\n";
-			continue;
-		}
+        if (cin.fail()) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input, please try again.\n";
+            continue;
+        }
 
-		// option one for loading file - utilizes the loadCourses method
-		switch (choice) {
-		case 1:
-			cout << "Enter file name: ";
-			cin >> filename;
-			loadCourses(filename, courseMap);
-			isLoaded = true;
-			break;
+        switch (choice) {
+        case 1:
+            cout << "Enter file name: ";
+            cin >> filename;
+            loadCourses(filename, *storage);
+            isLoaded = true;
+            break;
 
+        case 2:
+            if (!isLoaded) {
+                cout << "Please load course data first.\n";
+            } else {
+                printSortedCourses(*storage);
+            }
+            break;
 
-		// option 2 - checks if the course data is loaded and then prints the courses via the sorted courses method
-		case 2:
-			if (!isLoaded) {
-				cout << "Error, load course data first.\n";
-			}
-			else {
-				printSortedCourses(courseMap);
-			}
-			break;
+        case 3:
+            if (!isLoaded) {
+                cout << "Please load course data first.\n";
+            } else {
+                findCourse(*storage);
+            }
+            break;
 
-		// option 3 - checks for loaded course data and then finds a course based off the course ID, utilizing the findCourse method
-		case 3:
-			if (!isLoaded) {
-				cout << "Error, load course data first.\n";
-			}
-			else {
-				findCourse(courseMap);
-			}
-			break;
+        case 4:
+            runTests();
+            break;
 
-		// case for exiting program
-		case 9:
-			cout << "Exiting program." << endl;
-			return;
+        case 9:
+            cout << "Exiting program." << endl;
+            return;
 
-		// default case - error handling if an option is invalid
-		default:
-			cout << "Input invalid, please select a valid option." << endl;
-		}
-	}
+        default:
+            cout << "Invalid selection.\n";
+        }
+    }
 }
-// main method for program - runs the displayMenu method
+
+// Program entry point
 int main() {
-	displayMenu();
-	return 0;
+    displayMenu();
+    return 0;
 }
